@@ -2,6 +2,7 @@ package com.example.ui.admin
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -22,6 +23,8 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.model.BalanceType
 import com.example.model.Customer
 import com.example.model.MarketItem
+import com.example.model.TransactionRecord
+import com.example.model.TransactionType
 import com.example.ui.common.BalanceBadge
 import com.example.ui.theme.*
 import com.example.util.FormatUtils
@@ -820,4 +823,1108 @@ fun EditMarketItemNameDialog(
             }
         }
     )
+}
+
+// ==================== ADD BILL / MAAL PURCHASE DIALOG ====================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AddBillDialog(
+    customers: List<Customer>,
+    marketItems: List<MarketItem>,
+    preSelectedCustomer: Customer? = null,
+    onDismiss: () -> Unit,
+    onAddBill: (
+        customerId: String,
+        itemId: String?,
+        itemName: String,
+        quantity: Double,
+        unit: String,
+        rate: Double,
+        totalAmount: Double,
+        billNumber: String,
+        notes: String,
+        date: String
+    ) -> Unit
+) {
+    var selectedCustomer by remember { mutableStateOf(preSelectedCustomer ?: customers.firstOrNull()) }
+    var selectedItem by remember { mutableStateOf(marketItems.firstOrNull()) }
+    var customItemName by remember { mutableStateOf("") }
+    var isCustomItemMode by remember { mutableStateOf(false) }
+
+    var quantityText by remember { mutableStateOf("1") }
+    var selectedUnit by remember { mutableStateOf("Bags (بورے)") }
+    var rateText by remember {
+        val initialRate = selectedCustomer?.let { cust ->
+            selectedItem?.let { item ->
+                cust.customRatesMap[item.id] ?: item.currentRate
+            }
+        } ?: selectedItem?.currentRate ?: 0.0
+        mutableStateOf(if (initialRate > 0) initialRate.toString() else "")
+    }
+    var totalAmountText by remember { mutableStateOf("") }
+    var isManualTotal by remember { mutableStateOf(false) }
+
+    var billNumber by remember {
+        mutableStateOf("BILL-${System.currentTimeMillis().toString().takeLast(5)}")
+    }
+    var billDate by remember { mutableStateOf(FormatUtils.formatDateOnly()) }
+    var notes by remember { mutableStateOf("") }
+
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var customerDropdownExpanded by remember { mutableStateOf(false) }
+    var itemDropdownExpanded by remember { mutableStateOf(false) }
+    var unitDropdownExpanded by remember { mutableStateOf(false) }
+
+    val units = listOf("Bags (بورے)", "Maund (من)", "Kg (کلو)", "Cartons (کارٹن)", "Units (عدد)", "Truck (گاڑی)")
+
+    // Update rate when customer or item changes if not in custom mode
+    fun updateAutoRate(cust: Customer?, item: MarketItem?) {
+        if (cust != null && item != null && !isCustomItemMode) {
+            val r = cust.customRatesMap[item.id] ?: item.currentRate
+            rateText = r.toString()
+            val q = quantityText.toDoubleOrNull() ?: 1.0
+            if (!isManualTotal) {
+                totalAmountText = String.format(java.util.Locale.US, "%.0f", q * r)
+            }
+        }
+    }
+
+    // Auto-calculate total amount when qty or rate changes
+    LaunchedEffect(quantityText, rateText, isManualTotal) {
+        if (!isManualTotal) {
+            val q = quantityText.toDoubleOrNull() ?: 0.0
+            val r = rateText.toDoubleOrNull() ?: 0.0
+            val calculated = q * r
+            if (calculated > 0) {
+                totalAmountText = String.format(java.util.Locale.US, "%.0f", calculated)
+            }
+        }
+    }
+
+    val scrollState = rememberScrollState()
+
+    // Calculated balance impact preview
+    val billAmount = totalAmountText.toDoubleOrNull() ?: 0.0
+    val currentCust = selectedCustomer
+    val (newPreviewBalance, newPreviewType) = remember(currentCust, billAmount) {
+        if (currentCust != null) {
+            val signed = if (currentCust.balanceType == BalanceType.RECEIVABLE) currentCust.balance else -currentCust.balance
+            val newSigned = signed + billAmount
+            if (newSigned >= 0) Pair(newSigned, BalanceType.RECEIVABLE) else Pair(-newSigned, BalanceType.PAYABLE)
+        } else Pair(0.0, BalanceType.RECEIVABLE)
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .fillMaxHeight(0.92f),
+            shape = RoundedCornerShape(20.dp),
+            color = Color.White
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(20.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Surface(
+                            color = ReceivableRedBg,
+                            shape = CircleShape,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.ShoppingCart, contentDescription = null, tint = ReceivableRed, modifier = Modifier.size(20.dp))
+                            }
+                        }
+                        Column {
+                            Text(
+                                text = "New Bill (مال خریداری)",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = NavyDark
+                            )
+                            Text(
+                                text = "Goods / Maal purchase from customer",
+                                fontSize = 11.sp,
+                                color = SlateMuted
+                            )
+                        }
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    }
+                }
+
+                Divider(modifier = Modifier.padding(vertical = 12.dp), color = CardBorder)
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(scrollState),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    if (errorMessage != null) {
+                        Surface(
+                            color = ReceivableRedBg,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = errorMessage!!,
+                                color = ReceivableRed,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                    }
+
+                    // 1. CUSTOMER SELECTOR
+                    Text("1. Customer (گاہک کا نام) *", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = NavyDark)
+                    ExposedDropdownMenuBox(
+                        expanded = customerDropdownExpanded,
+                        onExpandedChange = { customerDropdownExpanded = !customerDropdownExpanded }
+                    ) {
+                        OutlinedTextField(
+                            value = selectedCustomer?.let { "${it.name} (${it.phone.ifBlank { "@" + it.username }})" } ?: "Select Customer",
+                            onValueChange = {},
+                            readOnly = true,
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = customerDropdownExpanded) },
+                            colors = appTextFieldColors(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor()
+                                .testTag("select_bill_customer"),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        ExposedDropdownMenu(
+                            expanded = customerDropdownExpanded,
+                            onDismissRequest = { customerDropdownExpanded = false }
+                        ) {
+                            customers.forEach { cust ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(cust.name, fontWeight = FontWeight.Bold, color = NavyDark)
+                                            Text(
+                                                "Current Balance: ${FormatUtils.formatPkr(cust.balance)} (${cust.balanceType.name})",
+                                                fontSize = 11.sp,
+                                                color = if (cust.balanceType == BalanceType.RECEIVABLE) ReceivableRed else PayableGreen
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedCustomer = cust
+                                        customerDropdownExpanded = false
+                                        errorMessage = null
+                                        updateAutoRate(cust, selectedItem)
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // 2. ITEM SELECTION
+                    Text("2. Item / Product (مال / آئٹم) *", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = NavyDark)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = !isCustomItemMode,
+                            onClick = {
+                                isCustomItemMode = false
+                                updateAutoRate(selectedCustomer, selectedItem)
+                            },
+                            label = { Text("Market Items") },
+                            leadingIcon = { if (!isCustomItemMode) Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                        )
+                        FilterChip(
+                            selected = isCustomItemMode,
+                            onClick = { isCustomItemMode = true },
+                            label = { Text("Custom / Other Item") },
+                            leadingIcon = { if (isCustomItemMode) Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                        )
+                    }
+
+                    if (!isCustomItemMode) {
+                        ExposedDropdownMenuBox(
+                            expanded = itemDropdownExpanded,
+                            onExpandedChange = { itemDropdownExpanded = !itemDropdownExpanded }
+                        ) {
+                            OutlinedTextField(
+                                value = selectedItem?.let { "${it.name} - Rate: ${FormatUtils.formatPkr(it.currentRate)}" } ?: "Select Item",
+                                onValueChange = {},
+                                readOnly = true,
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = itemDropdownExpanded) },
+                                colors = appTextFieldColors(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .menuAnchor()
+                                    .testTag("select_bill_item"),
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            ExposedDropdownMenu(
+                                expanded = itemDropdownExpanded,
+                                onDismissRequest = { itemDropdownExpanded = false }
+                            ) {
+                                marketItems.forEach { itm ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                Text(itm.name, fontWeight = FontWeight.SemiBold)
+                                                Text(FormatUtils.formatPkr(itm.currentRate), color = SlateMuted)
+                                            }
+                                        },
+                                        onClick = {
+                                            selectedItem = itm
+                                            itemDropdownExpanded = false
+                                            updateAutoRate(selectedCustomer, itm)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        OutlinedTextField(
+                            value = customItemName,
+                            onValueChange = { customItemName = it; errorMessage = null },
+                            label = { Text("Custom Item / Crop Name *") },
+                            placeholder = { Text("e.g. Gandum, Chawal, Kapas, Makai...") },
+                            colors = appTextFieldColors(),
+                            modifier = Modifier.fillMaxWidth().testTag("input_custom_item_name"),
+                            shape = RoundedCornerShape(10.dp),
+                            singleLine = true
+                        )
+                    }
+
+                    // 3. QUANTITY, UNIT & RATE
+                    Text("3. Quantity, Unit & Rate *", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = NavyDark)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = quantityText,
+                            onValueChange = {
+                                quantityText = it
+                                errorMessage = null
+                            },
+                            label = { Text("Qty / Weight *") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            colors = appTextFieldColors(),
+                            modifier = Modifier.weight(1f).testTag("input_bill_quantity"),
+                            shape = RoundedCornerShape(10.dp),
+                            singleLine = true
+                        )
+
+                        // Unit selector
+                        ExposedDropdownMenuBox(
+                            expanded = unitDropdownExpanded,
+                            onExpandedChange = { unitDropdownExpanded = !unitDropdownExpanded },
+                            modifier = Modifier.weight(1.2f)
+                        ) {
+                            OutlinedTextField(
+                                value = selectedUnit,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Unit") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = unitDropdownExpanded) },
+                                colors = appTextFieldColors(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .menuAnchor()
+                                    .testTag("select_bill_unit"),
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            ExposedDropdownMenu(
+                                expanded = unitDropdownExpanded,
+                                onDismissRequest = { unitDropdownExpanded = false }
+                            ) {
+                                units.forEach { u ->
+                                    DropdownMenuItem(
+                                        text = { Text(u) },
+                                        onClick = {
+                                            selectedUnit = u
+                                            unitDropdownExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Rate & Total Amount
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = rateText,
+                            onValueChange = {
+                                rateText = it
+                                errorMessage = null
+                            },
+                            label = { Text("Rate / Unit (Rs.) *") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            colors = appTextFieldColors(),
+                            modifier = Modifier.weight(1f).testTag("input_bill_rate"),
+                            shape = RoundedCornerShape(10.dp),
+                            singleLine = true
+                        )
+
+                        OutlinedTextField(
+                            value = totalAmountText,
+                            onValueChange = {
+                                totalAmountText = it
+                                isManualTotal = true
+                                errorMessage = null
+                            },
+                            label = { Text("Total Bill (Rs.) *") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            colors = appTextFieldColors(),
+                            modifier = Modifier.weight(1.2f).testTag("input_bill_total_amount"),
+                            shape = RoundedCornerShape(10.dp),
+                            singleLine = true
+                        )
+                    }
+
+                    // 4. BILL NO & DATE
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = billNumber,
+                            onValueChange = { billNumber = it },
+                            label = { Text("Bill / Invoice #") },
+                            colors = appTextFieldColors(),
+                            modifier = Modifier.weight(1f).testTag("input_bill_number"),
+                            shape = RoundedCornerShape(10.dp),
+                            singleLine = true
+                        )
+
+                        OutlinedTextField(
+                            value = billDate,
+                            onValueChange = { billDate = it },
+                            label = { Text("Date") },
+                            colors = appTextFieldColors(),
+                            modifier = Modifier.weight(1f).testTag("input_bill_date"),
+                            shape = RoundedCornerShape(10.dp),
+                            singleLine = true
+                        )
+                    }
+
+                    // Notes / Description
+                    OutlinedTextField(
+                        value = notes,
+                        onValueChange = { notes = it },
+                        label = { Text("Description / Notes (تفصیل)") },
+                        placeholder = { Text("e.g. 50 Bora Gandum Kharidari, Driver name...") },
+                        colors = appTextFieldColors(),
+                        modifier = Modifier.fillMaxWidth().testTag("input_bill_notes"),
+                        shape = RoundedCornerShape(10.dp),
+                        maxLines = 2
+                    )
+
+                    // 5. LIVE BALANCE IMPACT PREVIEW CARD
+                    if (selectedCustomer != null) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = NavyDark.copy(alpha = 0.05f)),
+                            border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(CardBorder))
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text("Khata Balance Impact (کھاتہ پر اثر):", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = NavyDark)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Current Balance:", fontSize = 12.sp, color = SlateMuted)
+                                    Text(
+                                        "${FormatUtils.formatPkr(selectedCustomer!!.balance)} (${selectedCustomer!!.balanceType.name})",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (selectedCustomer!!.balanceType == BalanceType.RECEIVABLE) ReceivableRed else PayableGreen
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("+ Bill (Mall Purchase):", fontSize = 12.sp, color = ReceivableRed, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        "+ ${FormatUtils.formatPkr(billAmount)}",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = ReceivableRed
+                                    )
+                                }
+                                HorizontalDivider(color = CardBorder)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("New Balance (نیا بقایا):", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = NavyDark)
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(
+                                            FormatUtils.formatPkr(newPreviewBalance),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp,
+                                            color = if (newPreviewType == BalanceType.RECEIVABLE) ReceivableRed else PayableGreen
+                                        )
+                                        BalanceBadge(balanceType = newPreviewType)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Action Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Cancel")
+                    }
+
+                    Button(
+                        onClick = {
+                            if (selectedCustomer == null) {
+                                errorMessage = "Please select a customer"
+                                return@Button
+                            }
+                            val finalItemName = if (isCustomItemMode) customItemName.trim() else (selectedItem?.name ?: "")
+                            if (finalItemName.isBlank()) {
+                                errorMessage = "Please provide an item or crop name"
+                                return@Button
+                            }
+                            val q = quantityText.toDoubleOrNull() ?: 0.0
+                            val r = rateText.toDoubleOrNull() ?: 0.0
+                            val total = totalAmountText.toDoubleOrNull() ?: 0.0
+
+                            if (total <= 0) {
+                                errorMessage = "Total bill amount must be greater than 0"
+                                return@Button
+                            }
+
+                            onAddBill(
+                                selectedCustomer!!.id,
+                                if (!isCustomItemMode) selectedItem?.id else null,
+                                finalItemName,
+                                q,
+                                selectedUnit,
+                                r,
+                                total,
+                                billNumber.trim(),
+                                notes.trim(),
+                                billDate.trim()
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = ReceivableRed),
+                        modifier = Modifier
+                            .weight(1.5f)
+                            .testTag("button_save_bill"),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Save Bill (بل درج کریں)", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==================== ADD PAYMENT / ADAIGI DIALOG ====================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AddPaymentDialog(
+    customers: List<Customer>,
+    preSelectedCustomer: Customer? = null,
+    onDismiss: () -> Unit,
+    onAddPayment: (
+        customerId: String,
+        amount: Double,
+        paymentMethod: String,
+        referenceNo: String,
+        notes: String,
+        date: String
+    ) -> Unit
+) {
+    var selectedCustomer by remember { mutableStateOf(preSelectedCustomer ?: customers.firstOrNull()) }
+    var amountText by remember { mutableStateOf("") }
+    var selectedMethod by remember { mutableStateOf("Cash (نقد)") }
+    var referenceNo by remember { mutableStateOf("") }
+    var paymentDate by remember { mutableStateOf(FormatUtils.formatDateOnly()) }
+    var notes by remember { mutableStateOf("") }
+
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var customerDropdownExpanded by remember { mutableStateOf(false) }
+    var methodDropdownExpanded by remember { mutableStateOf(false) }
+
+    val methods = listOf("Cash (نقد)", "Bank Transfer (بینک)", "Cheque (چیک)", "EasyPaisa / JazzCash", "Online")
+
+    val scrollState = rememberScrollState()
+
+    // Calculated balance impact preview
+    val payAmount = amountText.toDoubleOrNull() ?: 0.0
+    val currentCust = selectedCustomer
+    val (newPreviewBalance, newPreviewType) = remember(currentCust, payAmount) {
+        if (currentCust != null) {
+            val signed = if (currentCust.balanceType == BalanceType.RECEIVABLE) currentCust.balance else -currentCust.balance
+            val newSigned = signed - payAmount
+            if (newSigned >= 0) Pair(newSigned, BalanceType.RECEIVABLE) else Pair(-newSigned, BalanceType.PAYABLE)
+        } else Pair(0.0, BalanceType.RECEIVABLE)
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .fillMaxHeight(0.88f),
+            shape = RoundedCornerShape(20.dp),
+            color = Color.White
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(20.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Surface(
+                            color = PayableGreenBg,
+                            shape = CircleShape,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Payment, contentDescription = null, tint = PayableGreen, modifier = Modifier.size(20.dp))
+                            }
+                        }
+                        Column {
+                            Text(
+                                text = "New Payment (ادائیگی / وصولی)",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = NavyDark
+                            )
+                            Text(
+                                text = "Payment given to customer in Cash/Bank",
+                                fontSize = 11.sp,
+                                color = SlateMuted
+                            )
+                        }
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    }
+                }
+
+                Divider(modifier = Modifier.padding(vertical = 12.dp), color = CardBorder)
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(scrollState),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    if (errorMessage != null) {
+                        Surface(
+                            color = ReceivableRedBg,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = errorMessage!!,
+                                color = ReceivableRed,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                    }
+
+                    // 1. CUSTOMER SELECTOR
+                    Text("1. Customer (گاہک کا نام) *", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = NavyDark)
+                    ExposedDropdownMenuBox(
+                        expanded = customerDropdownExpanded,
+                        onExpandedChange = { customerDropdownExpanded = !customerDropdownExpanded }
+                    ) {
+                        OutlinedTextField(
+                            value = selectedCustomer?.let { "${it.name} (${it.phone.ifBlank { "@" + it.username }})" } ?: "Select Customer",
+                            onValueChange = {},
+                            readOnly = true,
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = customerDropdownExpanded) },
+                            colors = appTextFieldColors(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor()
+                                .testTag("select_payment_customer"),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        ExposedDropdownMenu(
+                            expanded = customerDropdownExpanded,
+                            onDismissRequest = { customerDropdownExpanded = false }
+                        ) {
+                            customers.forEach { cust ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(cust.name, fontWeight = FontWeight.Bold, color = NavyDark)
+                                            Text(
+                                                "Current Balance: ${FormatUtils.formatPkr(cust.balance)} (${cust.balanceType.name})",
+                                                fontSize = 11.sp,
+                                                color = if (cust.balanceType == BalanceType.RECEIVABLE) ReceivableRed else PayableGreen
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedCustomer = cust
+                                        customerDropdownExpanded = false
+                                        errorMessage = null
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // 2. PAYMENT AMOUNT
+                    Text("2. Amount & Payment Method *", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = NavyDark)
+                    OutlinedTextField(
+                        value = amountText,
+                        onValueChange = {
+                            amountText = it
+                            errorMessage = null
+                        },
+                        label = { Text("Payment Amount (رقم - Rs.) *") },
+                        placeholder = { Text("e.g. 50000") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        colors = appTextFieldColors(),
+                        modifier = Modifier.fillMaxWidth().testTag("input_payment_amount"),
+                        shape = RoundedCornerShape(10.dp),
+                        singleLine = true
+                    )
+
+                    // Payment Method selector
+                    ExposedDropdownMenuBox(
+                        expanded = methodDropdownExpanded,
+                        onExpandedChange = { methodDropdownExpanded = !methodDropdownExpanded }
+                    ) {
+                        OutlinedTextField(
+                            value = selectedMethod,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Payment Mode") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = methodDropdownExpanded) },
+                            colors = appTextFieldColors(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor()
+                                .testTag("select_payment_method"),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        ExposedDropdownMenu(
+                            expanded = methodDropdownExpanded,
+                            onDismissRequest = { methodDropdownExpanded = false }
+                        ) {
+                            methods.forEach { m ->
+                                DropdownMenuItem(
+                                    text = { Text(m) },
+                                    onClick = {
+                                        selectedMethod = m
+                                        methodDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // 3. REFERENCE NO & DATE
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = referenceNo,
+                            onValueChange = { referenceNo = it },
+                            label = { Text("Reference / Receipt #") },
+                            placeholder = { Text("Optional") },
+                            colors = appTextFieldColors(),
+                            modifier = Modifier.weight(1f).testTag("input_payment_reference"),
+                            shape = RoundedCornerShape(10.dp),
+                            singleLine = true
+                        )
+
+                        OutlinedTextField(
+                            value = paymentDate,
+                            onValueChange = { paymentDate = it },
+                            label = { Text("Date") },
+                            colors = appTextFieldColors(),
+                            modifier = Modifier.weight(1f).testTag("input_payment_date"),
+                            shape = RoundedCornerShape(10.dp),
+                            singleLine = true
+                        )
+                    }
+
+                    // Notes / Description
+                    OutlinedTextField(
+                        value = notes,
+                        onValueChange = { notes = it },
+                        label = { Text("Description / Notes (تفصیل)") },
+                        placeholder = { Text("e.g. Cash payment given, cheque details...") },
+                        colors = appTextFieldColors(),
+                        modifier = Modifier.fillMaxWidth().testTag("input_payment_notes"),
+                        shape = RoundedCornerShape(10.dp),
+                        maxLines = 2
+                    )
+
+                    // 4. LIVE BALANCE IMPACT PREVIEW CARD
+                    if (selectedCustomer != null) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = NavyDark.copy(alpha = 0.05f)),
+                            border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(CardBorder))
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text("Khata Balance Impact (کھاتہ پر اثر):", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = NavyDark)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Current Balance:", fontSize = 12.sp, color = SlateMuted)
+                                    Text(
+                                        "${FormatUtils.formatPkr(selectedCustomer!!.balance)} (${selectedCustomer!!.balanceType.name})",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (selectedCustomer!!.balanceType == BalanceType.RECEIVABLE) ReceivableRed else PayableGreen
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("- Payment Paid (ادائیگی):", fontSize = 12.sp, color = PayableGreen, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        "- ${FormatUtils.formatPkr(payAmount)}",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = PayableGreen
+                                    )
+                                }
+                                HorizontalDivider(color = CardBorder)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("New Balance (نیا بقایا):", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = NavyDark)
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(
+                                            FormatUtils.formatPkr(newPreviewBalance),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp,
+                                            color = if (newPreviewType == BalanceType.RECEIVABLE) ReceivableRed else PayableGreen
+                                        )
+                                        BalanceBadge(balanceType = newPreviewType)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Action Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Cancel")
+                    }
+
+                    Button(
+                        onClick = {
+                            if (selectedCustomer == null) {
+                                errorMessage = "Please select a customer"
+                                return@Button
+                            }
+                            val amt = amountText.toDoubleOrNull() ?: 0.0
+                            if (amt <= 0) {
+                                errorMessage = "Payment amount must be greater than 0"
+                                return@Button
+                            }
+
+                            onAddPayment(
+                                selectedCustomer!!.id,
+                                amt,
+                                selectedMethod.trim(),
+                                referenceNo.trim(),
+                                notes.trim(),
+                                paymentDate.trim()
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = PayableGreen),
+                        modifier = Modifier
+                            .weight(1.5f)
+                            .testTag("button_save_payment"),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Save Payment (ادائیگی درج کریں)", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==================== TRANSACTION DETAIL DIALOG ====================
+
+@Composable
+fun TransactionDetailDialog(
+    transaction: TransactionRecord,
+    onDismiss: () -> Unit,
+    onDelete: (() -> Unit)? = null
+) {
+    var showConfirmDelete by remember { mutableStateOf(false) }
+
+    if (showConfirmDelete && onDelete != null) {
+        AlertDialog(
+            onDismissRequest = { showConfirmDelete = false },
+            title = { Text("Delete Transaction?", fontWeight = FontWeight.Bold) },
+            text = { Text("Are you sure you want to delete this record? Customer balance will be automatically recalculated and adjusted.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showConfirmDelete = false
+                        onDelete()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = ReceivableRed)
+                ) {
+                    Text("Delete Record")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirmDelete = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .wrapContentHeight(),
+            shape = RoundedCornerShape(20.dp),
+            color = Color.White
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val isBill = transaction.type == TransactionType.BILL
+                        Surface(
+                            color = if (isBill) ReceivableRedBg else PayableGreenBg,
+                            shape = CircleShape,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = if (isBill) Icons.Default.ShoppingCart else Icons.Default.Payment,
+                                    contentDescription = null,
+                                    tint = if (isBill) ReceivableRed else PayableGreen,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        Column {
+                            Text(
+                                text = if (isBill) "Bill Details (مال خریداری)" else "Payment Receipt (ادائیگی)",
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = NavyDark
+                            )
+                            Text(
+                                text = "Ref: ${transaction.billNumber}",
+                                fontSize = 11.sp,
+                                color = SlateMuted
+                            )
+                        }
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    }
+                }
+
+                HorizontalDivider(color = CardBorder)
+
+                // Info Rows
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    DetailRow("Customer:", transaction.customerName)
+                    DetailRow("Date:", transaction.date.ifBlank { FormatUtils.formatDateTime(transaction.timestamp) })
+                    DetailRow("Type:", if (transaction.type == TransactionType.BILL) "Mall Purchase (Bill)" else "Payment (Adaigi)")
+                    
+                    if (transaction.type == TransactionType.BILL && transaction.itemName.isNotBlank()) {
+                        DetailRow("Item / Maal:", transaction.itemName)
+                        if (transaction.quantity > 0) {
+                            DetailRow("Quantity:", "${transaction.quantity} ${transaction.unit}")
+                        }
+                        if (transaction.rate > 0) {
+                            DetailRow("Rate:", "${FormatUtils.formatPkr(transaction.rate)} per ${transaction.unit}")
+                        }
+                    }
+
+                    if (transaction.paymentMethod.isNotBlank()) {
+                        DetailRow("Payment Mode:", transaction.paymentMethod)
+                    }
+
+                    DetailRow(
+                        "Total Amount:",
+                        FormatUtils.formatPkr(transaction.amount),
+                        valueColor = if (transaction.type == TransactionType.BILL) ReceivableRed else PayableGreen,
+                        isBold = true
+                    )
+
+                    if (transaction.notes.isNotBlank()) {
+                        DetailRow("Notes:", transaction.notes)
+                    }
+
+                    HorizontalDivider(color = CardBorder)
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Balance After Entry:", fontSize = 12.sp, color = SlateMuted)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                FormatUtils.formatPkr(transaction.balanceAfter),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = if (transaction.balanceTypeAfter == BalanceType.RECEIVABLE) ReceivableRed else PayableGreen
+                            )
+                            BalanceBadge(balanceType = transaction.balanceTypeAfter)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // Footer Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (onDelete != null) {
+                        OutlinedButton(
+                            onClick = { showConfirmDelete = true },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = ReceivableRed),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Delete")
+                        }
+                    }
+
+                    Button(
+                        onClick = onDismiss,
+                        colors = ButtonDefaults.buttonColors(containerColor = NavyDark),
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Close")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailRow(
+    label: String,
+    value: String,
+    valueColor: Color = NavyDark,
+    isBold: Boolean = false
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = label, fontSize = 13.sp, color = SlateMuted)
+        Text(
+            text = value,
+            fontSize = 13.sp,
+            fontWeight = if (isBold) FontWeight.Bold else FontWeight.Medium,
+            color = valueColor
+        )
+    }
 }

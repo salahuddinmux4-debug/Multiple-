@@ -43,7 +43,6 @@ fun AuthScreen(
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
-    var showDemoHelper by remember { mutableStateOf(false) }
 
     val focusManager = LocalFocusManager.current
     val scrollState = rememberScrollState()
@@ -389,81 +388,7 @@ fun AuthScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(18.dp))
-
-                // Demo Quick-Fill Helper Accordion
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .clickable { showDemoHelper = !showDemoHelper },
-                    color = Color(0xFFF1F5F9),
-                    border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(CardBorder))
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Info,
-                                    contentDescription = "Test credentials",
-                                    tint = InfoBlue,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = "Quick Test Credentials Helper",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = TextPrimary
-                                )
-                            }
-                            Icon(
-                                imageVector = if (showDemoHelper) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                contentDescription = "Expand",
-                                tint = TextSecondary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        AnimatedVisibility(visible = showDemoHelper) {
-                            Column(
-                                modifier = Modifier.padding(top = 10.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Text(
-                                    text = "Tap to auto-fill sample credentials for immediate testing:",
-                                    fontSize = 12.sp,
-                                    color = TextSecondary
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    OutlinedButton(
-                                        onClick = {
-                                            authViewModel.setTab(UserRole.ADMIN)
-                                            username = "admin"
-                                            password = "admin123"
-                                        },
-                                        modifier = Modifier.weight(1f),
-                                        shape = RoundedCornerShape(10.dp),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                                    ) {
-                                        Text("Admin (admin / admin123)", fontSize = 11.sp, color = NavyDark)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(24.dp))
 
                 // Security & Privacy Note
                 Row(

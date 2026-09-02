@@ -28,15 +28,19 @@ import com.example.model.BalanceType
 import com.example.model.Customer
 import com.example.model.MarketRates
 import com.example.model.RateHistoryEntry
+import com.example.model.TransactionRecord
+import com.example.model.TransactionType
 import com.example.ui.common.BalanceBadge
 import com.example.ui.common.MarketStatusBanner
 import com.example.ui.common.NetworkStatusBar
 import com.example.ui.common.RateItemCard
 import com.example.ui.theme.*
 import com.example.util.FormatUtils
+import androidx.compose.ui.text.style.TextOverflow
 
 enum class CustomerNavTab {
     DASHBOARD,
+    LEDGER,
     HISTORY,
     NOTIFICATIONS,
     PROFILE
@@ -53,6 +57,7 @@ fun CustomerHomeScreen(
     val marketRates by customerViewModel.currentRatesFlow.collectAsState()
     val rateHistory by customerViewModel.rateHistoryFlow.collectAsState()
     val notifications by customerViewModel.notificationsFlow.collectAsState()
+    val myTransactions by customerViewModel.myTransactionsFlow.collectAsState()
     val isOnline by customerViewModel.isOnlineFlow.collectAsState()
     val isAccountBlocked by customerViewModel.isAccountBlocked.collectAsState()
 
@@ -214,10 +219,17 @@ fun CustomerHomeScreen(
                     modifier = Modifier.testTag("nav_customer_dashboard")
                 )
                 NavigationBarItem(
+                    selected = currentTab == CustomerNavTab.LEDGER,
+                    onClick = { currentTab = CustomerNavTab.LEDGER },
+                    icon = { Icon(Icons.Default.ReceiptLong, contentDescription = "Ledger") },
+                    label = { Text("Ledger / کھاتہ") },
+                    modifier = Modifier.testTag("nav_customer_ledger")
+                )
+                NavigationBarItem(
                     selected = currentTab == CustomerNavTab.HISTORY,
                     onClick = { currentTab = CustomerNavTab.HISTORY },
                     icon = { Icon(Icons.Default.History, contentDescription = "Rate History") },
-                    label = { Text("Rate History") },
+                    label = { Text("Rates") },
                     modifier = Modifier.testTag("nav_customer_history")
                 )
                 NavigationBarItem(
@@ -260,8 +272,14 @@ fun CustomerHomeScreen(
                 CustomerNavTab.DASHBOARD -> CustomerDashboardView(
                     customer = customer,
                     marketRates = marketRates,
+                    transactions = myTransactions,
                     customerViewModel = customerViewModel,
-                    onViewHistoryClick = { currentTab = CustomerNavTab.HISTORY }
+                    onViewHistoryClick = { currentTab = CustomerNavTab.HISTORY },
+                    onViewLedgerClick = { currentTab = CustomerNavTab.LEDGER }
+                )
+                CustomerNavTab.LEDGER -> CustomerLedgerView(
+                    customer = customer,
+                    transactions = myTransactions
                 )
                 CustomerNavTab.HISTORY -> CustomerRateHistoryView(
                     rateHistory = rateHistory
@@ -283,8 +301,10 @@ fun CustomerHomeScreen(
 fun CustomerDashboardView(
     customer: Customer?,
     marketRates: MarketRates?,
+    transactions: List<TransactionRecord> = emptyList(),
     customerViewModel: CustomerViewModel,
     onViewHistoryClick: () -> Unit,
+    onViewLedgerClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
@@ -430,6 +450,82 @@ fun CustomerDashboardView(
             }
         }
 
+        // ==================== RECENT TRANSACTIONS / LEDGER QUICK CARD ====================
+        if (transactions.isNotEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(CardBorder))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.ReceiptLong, contentDescription = null, tint = NavyDark, modifier = Modifier.size(18.dp))
+                            Text("Recent Transactions (کھاتہ)", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = NavyDark)
+                        }
+
+                        TextButton(onClick = onViewLedgerClick) {
+                            Text("View All", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = SlateAccent)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    transactions.take(3).forEach { tx ->
+                        val isBill = tx.type == TransactionType.BILL
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = if (isBill) Color(0xFFFEF2F2) else PayableGreenBg,
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = if (isBill) Icons.Default.ShoppingCart else Icons.Default.Payment,
+                                            contentDescription = null,
+                                            tint = if (isBill) ReceivableRed else PayableGreen,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                }
+                                Column {
+                                    Text(
+                                        text = if (isBill) "Bill: ${tx.itemName} (${tx.quantity} ${tx.unit})" else "Payment (${tx.paymentMethod})",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = NavyDark
+                                    )
+                                    Text(text = tx.date, fontSize = 11.sp, color = SlateMuted)
+                                }
+                            }
+
+                            Text(
+                                text = (if (isBill) "+" else "-") + " " + FormatUtils.formatPkr(tx.amount),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isBill) ReceivableRed else PayableGreen
+                            )
+                        }
+                        if (tx != transactions.take(3).last()) {
+                            HorizontalDivider(color = Color(0xFFF1F5F9), modifier = Modifier.padding(vertical = 2.dp))
+                        }
+                    }
+                }
+            }
+        }
+
         // ==================== MARKET STATUS BANNER ====================
         MarketStatusBanner(
             isOpen = isMarketOpen,
@@ -546,6 +642,291 @@ fun CustomerDashboardView(
         }
 
         Spacer(modifier = Modifier.height(20.dp))
+    }
+}
+
+@Composable
+fun CustomerLedgerView(
+    customer: Customer?,
+    transactions: List<TransactionRecord>,
+    modifier: Modifier = Modifier
+) {
+    var selectedFilter by remember { mutableStateOf("ALL") } // ALL, BILL, PAYMENT
+    var selectedTxForDetail by remember { mutableStateOf<TransactionRecord?>(null) }
+
+    val filteredTransactions = when (selectedFilter) {
+        "BILL" -> transactions.filter { it.type == TransactionType.BILL }
+        "PAYMENT" -> transactions.filter { it.type == TransactionType.PAYMENT }
+        else -> transactions
+    }
+
+    val totalPurchased = transactions.filter { it.type == TransactionType.BILL }.sumOf { it.amount }
+    val totalPaid = transactions.filter { it.type == TransactionType.PAYMENT }.sumOf { it.amount }
+
+    if (selectedTxForDetail != null) {
+        val tx = selectedTxForDetail!!
+        val isBill = tx.type == TransactionType.BILL
+        AlertDialog(
+            onDismissRequest = { selectedTxForDetail = null },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(
+                        imageVector = if (isBill) Icons.Default.ShoppingCart else Icons.Default.Payment,
+                        contentDescription = null,
+                        tint = if (isBill) ReceivableRed else PayableGreen
+                    )
+                    Text(if (isBill) "Bill Details (مال بل)" else "Payment Voucher (ادائیگی رسید)", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Date:", color = SlateMuted, fontSize = 13.sp)
+                        Text(tx.date, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                    if (isBill && tx.billNumber.isNotBlank()) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Bill Number:", color = SlateMuted, fontSize = 13.sp)
+                            Text("#${tx.billNumber}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                    }
+                    if (isBill && tx.itemName.isNotBlank()) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Item Purchased:", color = SlateMuted, fontSize = 13.sp)
+                            Text(tx.itemName, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Quantity / Rate:", color = SlateMuted, fontSize = 13.sp)
+                            Text("${tx.quantity} ${tx.unit} @ Rs. ${tx.rate}", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        }
+                    }
+                    if (!isBill) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Payment Mode:", color = SlateMuted, fontSize = 13.sp)
+                            Text(tx.paymentMethod, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                    }
+                    HorizontalDivider()
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Total Amount:", color = SlateMuted, fontSize = 14.sp)
+                        Text(FormatUtils.formatPkr(tx.amount), fontWeight = FontWeight.Black, fontSize = 16.sp, color = if (isBill) ReceivableRed else PayableGreen)
+                    }
+                    if (tx.notes.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("Note / Description: ${tx.notes}", fontSize = 12.sp, color = SlateMuted)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { selectedTxForDetail = null },
+                    colors = ButtonDefaults.buttonColors(containerColor = NavyDark)
+                ) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Balance Header Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(CardBorder))
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Current Balance (موجودہ بقایا)", fontSize = 12.sp, color = SlateMuted)
+                        Text(
+                            text = FormatUtils.formatPkr(customer?.balance ?: 0.0),
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (customer?.balanceType == BalanceType.RECEIVABLE) ReceivableRed else PayableGreen
+                        )
+                    }
+                    BalanceBadge(balanceType = customer?.balanceType ?: BalanceType.RECEIVABLE, isLarge = false)
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = Color(0xFFF1F5F9))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text("Total Purchases (مال خریدا)", fontSize = 11.sp, color = SlateMuted)
+                        Text(FormatUtils.formatPkr(totalPurchased), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = NavyDark)
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("Total Paid (کل ادائیگی)", fontSize = 11.sp, color = SlateMuted)
+                        Text(FormatUtils.formatPkr(totalPaid), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = PayableGreen)
+                    }
+                }
+            }
+        }
+
+        // Filter Chips
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            listOf(
+                "ALL" to "All (${transactions.size})",
+                "BILL" to "Purchased Bills (${transactions.count { it.type == TransactionType.BILL }})",
+                "PAYMENT" to "Payments (${transactions.count { it.type == TransactionType.PAYMENT }})"
+            ).forEach { (key, label) ->
+                FilterChip(
+                    selected = selectedFilter == key,
+                    onClick = { selectedFilter = key },
+                    label = { Text(label, fontSize = 11.sp, fontWeight = if (selectedFilter == key) FontWeight.Bold else FontWeight.Normal) }
+                )
+            }
+        }
+
+        // Transactions List
+        if (filteredTransactions.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Default.ReceiptLong, contentDescription = null, tint = SlateMuted, modifier = Modifier.size(48.dp))
+                    Text("No transactions recorded yet", fontSize = 15.sp, color = SlateMuted)
+                }
+            }
+        } else {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                items(filteredTransactions, key = { it.id }) { tx ->
+                    val isBill = tx.type == TransactionType.BILL
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { selectedTxForDetail = tx }
+                            .testTag("cust_tx_card_${tx.id}"),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(CardBorder))
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = if (isBill) Color(0xFFFEF2F2) else PayableGreenBg,
+                                        modifier = Modifier.size(38.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = if (isBill) Icons.Default.ShoppingCart else Icons.Default.Payment,
+                                                contentDescription = null,
+                                                tint = if (isBill) ReceivableRed else PayableGreen,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Column {
+                                        Text(
+                                            text = if (isBill) {
+                                                if (tx.itemName.isNotBlank()) "Bill: ${tx.itemName}" else "Bill Purchase (مال)"
+                                            } else {
+                                                "Payment (${tx.paymentMethod})"
+                                            },
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = NavyDark
+                                        )
+                                        Text(
+                                            text = "${tx.date}${if (isBill && tx.billNumber.isNotBlank()) " • Bill #${tx.billNumber}" else ""}",
+                                            fontSize = 12.sp,
+                                            color = SlateMuted
+                                        )
+                                    }
+                                }
+
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        text = (if (isBill) "+" else "-") + " " + FormatUtils.formatPkr(tx.amount),
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = if (isBill) ReceivableRed else PayableGreen
+                                    )
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = if (isBill) ReceivableRedBg else PayableGreenBg
+                                    ) {
+                                        Text(
+                                            text = if (isBill) "PURCHASE" else "PAID",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = if (isBill) ReceivableRed else PayableGreen,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (isBill && tx.quantity > 0) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Surface(
+                                    color = Color(0xFFF8FAFC),
+                                    shape = RoundedCornerShape(6.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = "Qty: ${tx.quantity} ${tx.unit} @ Rs. ${tx.rate}/${tx.unit}",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = NavyDark,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                                    )
+                                }
+                            }
+
+                            if (tx.notes.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Note: ${tx.notes}",
+                                    fontSize = 11.sp,
+                                    color = SlateMuted,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

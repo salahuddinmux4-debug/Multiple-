@@ -137,3 +137,33 @@ interface AdminDao {
     @Query("SELECT COUNT(*) FROM admins")
     suspend fun getAdminCount(): Int
 }
+
+@Dao
+interface TransactionDao {
+    @Query("SELECT * FROM transactions ORDER BY timestamp DESC")
+    fun getAllTransactionsFlow(): Flow<List<TransactionEntity>>
+
+    @Query("SELECT * FROM transactions ORDER BY timestamp DESC")
+    suspend fun getAllTransactions(): List<TransactionEntity>
+
+    @Query("SELECT * FROM transactions WHERE customerId = :customerId ORDER BY timestamp DESC")
+    fun getTransactionsForCustomerFlow(customerId: String): Flow<List<TransactionEntity>>
+
+    @Query("SELECT * FROM transactions WHERE customerId = :customerId ORDER BY timestamp DESC")
+    suspend fun getTransactionsForCustomer(customerId: String): List<TransactionEntity>
+
+    @Query("SELECT * FROM transactions WHERE id = :id LIMIT 1")
+    suspend fun getTransactionById(id: String): TransactionEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTransaction(transaction: TransactionEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTransactions(transactions: List<TransactionEntity>)
+
+    @Query("DELETE FROM transactions WHERE id = :id")
+    suspend fun deleteTransactionById(id: String)
+
+    @Query("SELECT COUNT(*) FROM transactions")
+    suspend fun getTransactionCount(): Int
+}

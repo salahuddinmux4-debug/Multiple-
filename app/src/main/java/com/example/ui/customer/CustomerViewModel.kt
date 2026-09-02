@@ -9,6 +9,7 @@ import com.example.model.Customer
 import com.example.model.MarketItem
 import com.example.model.MarketRates
 import com.example.model.RateHistoryEntry
+import com.example.model.TransactionRecord
 import com.example.util.NetworkMonitor
 import com.example.util.SessionManager
 import kotlinx.coroutines.flow.*
@@ -48,6 +49,13 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
 
     val notificationsFlow: StateFlow<List<AppNotification>> = if (currentCustomerId.isNotBlank()) {
         repository.getNotificationsForCustomerFlow(currentCustomerId)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    } else {
+        MutableStateFlow(emptyList())
+    }
+
+    val myTransactionsFlow: StateFlow<List<TransactionRecord>> = if (currentCustomerId.isNotBlank()) {
+        repository.getTransactionsForCustomerFlow(currentCustomerId)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     } else {
         MutableStateFlow(emptyList())

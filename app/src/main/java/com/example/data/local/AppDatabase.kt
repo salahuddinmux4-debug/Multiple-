@@ -12,9 +12,10 @@ import androidx.room.RoomDatabase
         MarketRatesEntity::class,
         RateHistoryEntity::class,
         NotificationEntity::class,
-        AdminEntity::class
+        AdminEntity::class,
+        TransactionEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -24,6 +25,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun rateHistoryDao(): RateHistoryDao
     abstract fun notificationDao(): NotificationDao
     abstract fun adminDao(): AdminDao
+    abstract fun transactionDao(): TransactionDao
 
     companion object {
         @Volatile

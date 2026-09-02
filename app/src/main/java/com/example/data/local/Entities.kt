@@ -11,6 +11,8 @@ import com.example.model.RateHistoryItemSnapshot
 import com.example.model.AppNotification
 import com.example.model.NotificationType
 import com.example.model.AdminUser
+import com.example.model.TransactionType
+import com.example.model.TransactionRecord
 
 @Entity(tableName = "customers")
 data class CustomerEntity(
@@ -280,6 +282,75 @@ data class AdminEntity(
             passwordHash = admin.passwordHash,
             email = admin.email,
             lastLogin = admin.lastLogin
+        )
+    }
+}
+
+@Entity(tableName = "transactions")
+data class TransactionEntity(
+    @PrimaryKey val id: String,
+    val customerId: String,
+    val customerName: String,
+    val type: String, // BILL, PAYMENT
+    val itemId: String? = null,
+    val itemName: String = "",
+    val quantity: Double = 0.0,
+    val unit: String = "Kg",
+    val rate: Double = 0.0,
+    val amount: Double = 0.0,
+    val paymentMethod: String = "Cash",
+    val billNumber: String = "",
+    val date: String = "",
+    val timestamp: Long = System.currentTimeMillis(),
+    val notes: String = "",
+    val balanceBefore: Double = 0.0,
+    val balanceAfter: Double = 0.0,
+    val balanceTypeAfter: String = BalanceType.RECEIVABLE.name,
+    val recordedBy: String = "Admin"
+) {
+    fun toDomain(): TransactionRecord = TransactionRecord(
+        id = id,
+        customerId = customerId,
+        customerName = customerName,
+        type = try { TransactionType.valueOf(type) } catch (_: Exception) { TransactionType.BILL },
+        itemId = itemId,
+        itemName = itemName,
+        quantity = quantity,
+        unit = unit,
+        rate = rate,
+        amount = amount,
+        paymentMethod = paymentMethod,
+        billNumber = billNumber,
+        date = date,
+        timestamp = timestamp,
+        notes = notes,
+        balanceBefore = balanceBefore,
+        balanceAfter = balanceAfter,
+        balanceTypeAfter = try { BalanceType.valueOf(balanceTypeAfter) } catch (_: Exception) { BalanceType.RECEIVABLE },
+        recordedBy = recordedBy
+    )
+
+    companion object {
+        fun fromDomain(record: TransactionRecord): TransactionEntity = TransactionEntity(
+            id = record.id,
+            customerId = record.customerId,
+            customerName = record.customerName,
+            type = record.type.name,
+            itemId = record.itemId,
+            itemName = record.itemName,
+            quantity = record.quantity,
+            unit = record.unit,
+            rate = record.rate,
+            amount = record.amount,
+            paymentMethod = record.paymentMethod,
+            billNumber = record.billNumber,
+            date = record.date,
+            timestamp = record.timestamp,
+            notes = record.notes,
+            balanceBefore = record.balanceBefore,
+            balanceAfter = record.balanceAfter,
+            balanceTypeAfter = record.balanceTypeAfter.name,
+            recordedBy = record.recordedBy
         )
     }
 }

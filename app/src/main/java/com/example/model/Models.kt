@@ -103,3 +103,30 @@ data class AdminUser(
     val email: String = "",
     val lastLogin: Long = System.currentTimeMillis()
 )
+
+enum class TransactionType {
+    BILL,    // Maal Purchase (Goods bought from customer) -> Increases Customer Receivable (+)
+    PAYMENT  // Adaigi (Cash/Bank payment given to customer) -> Decreases Customer Receivable (-)
+}
+
+data class TransactionRecord(
+    val id: String,
+    val customerId: String,
+    val customerName: String,
+    val type: TransactionType,
+    val itemId: String? = null,
+    val itemName: String = "",
+    val quantity: Double = 0.0,
+    val unit: String = "Kg",
+    val rate: Double = 0.0,
+    val amount: Double = 0.0,
+    val paymentMethod: String = "Cash", // Cash, Bank Transfer, Cheque, Online
+    val billNumber: String = "",
+    val date: String = "",
+    val timestamp: Long = System.currentTimeMillis(),
+    val notes: String = "",
+    val balanceBefore: Double = 0.0,
+    val balanceAfter: Double = 0.0,
+    val balanceTypeAfter: BalanceType = BalanceType.RECEIVABLE,
+    val recordedBy: String = "Admin"
+)

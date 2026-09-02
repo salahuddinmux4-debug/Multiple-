@@ -8,6 +8,7 @@ import com.example.data.local.MarketItemEntity
 import com.example.data.local.MarketRatesEntity
 import com.example.data.local.NotificationEntity
 import com.example.data.local.RateHistoryEntity
+import com.example.data.local.TransactionEntity
 import com.example.model.AdminUser
 import com.example.model.AppNotification
 import com.example.model.BalanceType
@@ -16,6 +17,8 @@ import com.example.model.MarketItem
 import com.example.model.MarketRates
 import com.example.model.NotificationType
 import com.example.model.RateHistoryEntry
+import com.example.model.TransactionRecord
+import com.example.model.TransactionType
 import com.example.util.FormatUtils
 import com.example.util.SecurityUtils
 import kotlinx.coroutines.CoroutineScope
@@ -34,6 +37,7 @@ class MujahidRepository(private val context: Context) {
     private val rateHistoryDao = database.rateHistoryDao()
     private val notificationDao = database.notificationDao()
     private val adminDao = database.adminDao()
+    private val transactionDao = database.transactionDao()
 
     init {
         CoroutineScope(Dispatchers.IO).launch {
@@ -139,6 +143,54 @@ class MujahidRepository(private val context: Context) {
             )
             customerDao.insertCustomer(CustomerEntity.fromDomain(demoCustomer1))
             customerDao.insertCustomer(CustomerEntity.fromDomain(demoCustomer2))
+        }
+
+        // Seed Sample Transactions if empty
+        if (transactionDao.getTransactionCount() == 0) {
+            val now = System.currentTimeMillis()
+            val sampleTx1 = TransactionEntity(
+                id = "tx_seed_1",
+                customerId = "cust_demo_1",
+                customerName = "Tariq Mahmood",
+                type = TransactionType.BILL.name,
+                itemId = "item_1",
+                itemName = "Item 1 (Cotton)",
+                quantity = 50.0,
+                unit = "Bags (بورے)",
+                rate = 295.0,
+                amount = 14750.0,
+                paymentMethod = "Credit",
+                billNumber = "BILL-1001",
+                date = FormatUtils.formatDateOnly(now - 172800000L),
+                timestamp = now - 172800000L,
+                notes = "50 Bags Maal Purchase from customer",
+                balanceBefore = 30250.0,
+                balanceAfter = 45000.0,
+                balanceTypeAfter = BalanceType.RECEIVABLE.name,
+                recordedBy = "Admin"
+            )
+            val sampleTx2 = TransactionEntity(
+                id = "tx_seed_2",
+                customerId = "cust_demo_2",
+                customerName = "Ali Hassan",
+                type = TransactionType.PAYMENT.name,
+                itemId = null,
+                itemName = "",
+                quantity = 0.0,
+                unit = "",
+                rate = 0.0,
+                amount = 15000.0,
+                paymentMethod = "Cash",
+                billNumber = "",
+                date = FormatUtils.formatDateOnly(now - 86400000L),
+                timestamp = now - 86400000L,
+                notes = "Cash Adaigi / payment given to Ali Hassan",
+                balanceBefore = 13500.0,
+                balanceAfter = 28500.0,
+                balanceTypeAfter = BalanceType.PAYABLE.name,
+                recordedBy = "Admin"
+            )
+            transactionDao.insertTransactions(listOf(sampleTx1, sampleTx2))
         }
     }
 
@@ -581,5 +633,197 @@ class MujahidRepository(private val context: Context) {
             type = NotificationType.SYSTEM_ALERT
         )
         notificationDao.insertNotification(NotificationEntity.fromDomain(notif))
+    }
+
+    // ==================== TRANSACTIONS (BILLS & PAYMENTS / KHATA) ====================
+
+    fun getAllTransactionsFlow(): Flow<List<TransactionRecord>> {
+        return transactionDao.getAllTransactionsFlow().map { list -> list.map { it.toDomain() } }
+    }
+
+    fun getTransactionsForCustomerFlow(customerId: String): Flow<List<TransactionRecord>> {
+        return transactionDao.getTransactionsForCustomerFlow(customerId).map { list -> list.map { it.toDomain() } }
+    }
+
+    suspend fun addBillPurchase(
+        customerId: String,
+        itemId: String?,
+        itemName: String,
+        quantity: Double,
+        unit: String,
+        rate: Double,
+        totalAmount: Double,
+        billNumber: String,
+        notes: String,
+        date: String = FormatUtils.formatDateOnly(),
+        recordedBy: String = "Admin"
+    ): Result<TransactionRecord> = withContext(Dispatchers.IO) {
+        val customerEntity = customerDao.getCustomerById(customerId)
+            ?: return@withContext Result.failure(Exception("Customer not found"))
+
+        val currentBalance = customerEntity.balance
+        val currentType = try { BalanceType.valueOf(customerEntity.balanceType) } catch (_: Exception) { BalanceType.RECEIVABLE }
+
+        // When admin buys goods (Bill) from customer, admin owes this amount to customer.
+        // In customer terms: Receivable increases (+), Payable decreases.
+        val signedCurrent = if (currentType == BalanceType.RECEIVABLE) currentBalance else -currentBalance
+        val signedNew = signedCurrent + totalAmount
+        val newBalance = if (signedNew >= 0) signedNew else -signedNew
+        val newType = if (signedNew >= 0) BalanceType.RECEIVABLE else BalanceType.PAYABLE
+
+        val txId = "bill_${System.currentTimeMillis()}_${(100..999).random()}"
+        val finalBillNo = if (billNumber.isNotBlank()) billNumber.trim() else "BILL-${System.currentTimeMillis().toString().takeLast(4)}"
+
+        val transaction = TransactionRecord(
+            id = txId,
+            customerId = customerId,
+            customerName = customerEntity.name,
+            type = TransactionType.BILL,
+            itemId = itemId,
+            itemName = itemName.trim(),
+            quantity = quantity,
+            unit = unit.trim(),
+            rate = rate,
+            amount = totalAmount,
+            paymentMethod = "Credit (Udhaar)",
+            billNumber = finalBillNo,
+            date = if (date.isNotBlank()) date.trim() else FormatUtils.formatDateOnly(),
+            timestamp = System.currentTimeMillis(),
+            notes = notes.trim(),
+            balanceBefore = currentBalance,
+            balanceAfter = newBalance,
+            balanceTypeAfter = newType,
+            recordedBy = recordedBy
+        )
+
+        // Save transaction
+        transactionDao.insertTransaction(TransactionEntity.fromDomain(transaction))
+
+        // Update customer balance
+        val updatedCustomer = customerEntity.copy(
+            balance = newBalance,
+            balanceType = newType.name,
+            updatedAt = System.currentTimeMillis()
+        )
+        customerDao.updateCustomer(updatedCustomer)
+
+        // Notify customer
+        val notif = AppNotification(
+            id = UUID.randomUUID().toString(),
+            customerId = customerId,
+            title = "New Bill: ${FormatUtils.formatPkr(totalAmount)}",
+            message = "Maal Purchase of ${itemName} (${quantity} ${unit}) recorded. New Balance: ${FormatUtils.formatPkr(newBalance)} (${newType.name}).",
+            timestamp = System.currentTimeMillis(),
+            type = NotificationType.BALANCE_UPDATE
+        )
+        notificationDao.insertNotification(NotificationEntity.fromDomain(notif))
+
+        Result.success(transaction)
+    }
+
+    suspend fun addPaymentGiven(
+        customerId: String,
+        amount: Double,
+        paymentMethod: String,
+        referenceNo: String,
+        notes: String,
+        date: String = FormatUtils.formatDateOnly(),
+        recordedBy: String = "Admin"
+    ): Result<TransactionRecord> = withContext(Dispatchers.IO) {
+        val customerEntity = customerDao.getCustomerById(customerId)
+            ?: return@withContext Result.failure(Exception("Customer not found"))
+
+        if (amount <= 0) {
+            return@withContext Result.failure(Exception("Payment amount must be greater than 0"))
+        }
+
+        val currentBalance = customerEntity.balance
+        val currentType = try { BalanceType.valueOf(customerEntity.balanceType) } catch (_: Exception) { BalanceType.RECEIVABLE }
+
+        // When admin gives payment to customer, customer's receivable reduces (-) or customer becomes payable.
+        val signedCurrent = if (currentType == BalanceType.RECEIVABLE) currentBalance else -currentBalance
+        val signedNew = signedCurrent - amount
+        val newBalance = if (signedNew >= 0) signedNew else -signedNew
+        val newType = if (signedNew >= 0) BalanceType.RECEIVABLE else BalanceType.PAYABLE
+
+        val txId = "pay_${System.currentTimeMillis()}_${(100..999).random()}"
+        val transaction = TransactionRecord(
+            id = txId,
+            customerId = customerId,
+            customerName = customerEntity.name,
+            type = TransactionType.PAYMENT,
+            itemId = null,
+            itemName = "Payment (Adaigi)",
+            quantity = 0.0,
+            unit = "",
+            rate = 0.0,
+            amount = amount,
+            paymentMethod = if (paymentMethod.isNotBlank()) paymentMethod.trim() else "Cash",
+            billNumber = if (referenceNo.isNotBlank()) referenceNo.trim() else "PAY-${System.currentTimeMillis().toString().takeLast(4)}",
+            date = if (date.isNotBlank()) date.trim() else FormatUtils.formatDateOnly(),
+            timestamp = System.currentTimeMillis(),
+            notes = notes.trim(),
+            balanceBefore = currentBalance,
+            balanceAfter = newBalance,
+            balanceTypeAfter = newType,
+            recordedBy = recordedBy
+        )
+
+        // Save transaction
+        transactionDao.insertTransaction(TransactionEntity.fromDomain(transaction))
+
+        // Update customer balance
+        val updatedCustomer = customerEntity.copy(
+            balance = newBalance,
+            balanceType = newType.name,
+            updatedAt = System.currentTimeMillis()
+        )
+        customerDao.updateCustomer(updatedCustomer)
+
+        // Notify customer
+        val notif = AppNotification(
+            id = UUID.randomUUID().toString(),
+            customerId = customerId,
+            title = "Payment Received: ${FormatUtils.formatPkr(amount)}",
+            message = "Payment of ${FormatUtils.formatPkr(amount)} received via ${transaction.paymentMethod}. Remaining Balance: ${FormatUtils.formatPkr(newBalance)} (${newType.name}).",
+            timestamp = System.currentTimeMillis(),
+            type = NotificationType.BALANCE_UPDATE
+        )
+        notificationDao.insertNotification(NotificationEntity.fromDomain(notif))
+
+        Result.success(transaction)
+    }
+
+    suspend fun deleteTransaction(transactionId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val tx = transactionDao.getTransactionById(transactionId)
+            ?: return@withContext Result.failure(Exception("Transaction not found"))
+
+        // Revert balance impact on customer
+        val customerEntity = customerDao.getCustomerById(tx.customerId)
+        if (customerEntity != null) {
+            val currentBalance = customerEntity.balance
+            val currentType = try { BalanceType.valueOf(customerEntity.balanceType) } catch (_: Exception) { BalanceType.RECEIVABLE }
+            val signedCurrent = if (currentType == BalanceType.RECEIVABLE) currentBalance else -currentBalance
+
+            // If it was a BILL (+amount), deleting it means subtract amount.
+            // If it was a PAYMENT (-amount), deleting it means add amount.
+            val signedReverted = if (tx.type == TransactionType.BILL.name) {
+                signedCurrent - tx.amount
+            } else {
+                signedCurrent + tx.amount
+            }
+
+            val newBalance = if (signedReverted >= 0) signedReverted else -signedReverted
+            val newType = if (signedReverted >= 0) BalanceType.RECEIVABLE else BalanceType.PAYABLE
+
+            customerDao.updateCustomer(customerEntity.copy(
+                balance = newBalance,
+                balanceType = newType.name,
+                updatedAt = System.currentTimeMillis()
+            ))
+        }
+
+        transactionDao.deleteTransactionById(transactionId)
+        Result.success(Unit)
     }
 }

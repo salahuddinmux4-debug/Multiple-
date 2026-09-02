@@ -31,6 +31,8 @@ import com.example.model.Customer
 import com.example.model.MarketItem
 import com.example.model.MarketRates
 import com.example.model.RateHistoryEntry
+import com.example.model.TransactionRecord
+import com.example.model.TransactionType
 import com.example.ui.common.BalanceBadge
 import com.example.ui.common.MarketStatusBanner
 import com.example.ui.theme.*
@@ -39,8 +41,8 @@ import com.example.util.FormatUtils
 enum class AdminNavTab {
     DASHBOARD,
     CUSTOMERS,
+    TRANSACTIONS,
     DAILY_RATES,
-    HISTORY,
     NOTIFICATIONS
 }
 
@@ -56,6 +58,7 @@ fun AdminHomeScreen(
     val marketRates by adminViewModel.currentRatesFlow.collectAsState()
     val rateHistory by adminViewModel.rateHistoryFlow.collectAsState()
     val notifications by adminViewModel.notificationsFlow.collectAsState()
+    val transactions by adminViewModel.transactionsFlow.collectAsState()
     val stats by adminViewModel.statsFlow.collectAsState()
     val statusMessage by adminViewModel.statusMessage.collectAsState()
 
@@ -72,6 +75,12 @@ fun AdminHomeScreen(
     var showAddItemDialog by remember { mutableStateOf(false) }
     var itemToRename by remember { mutableStateOf<MarketItem?>(null) }
     var itemToRemove by remember { mutableStateOf<MarketItem?>(null) }
+
+    // Transaction Dialog States (Bills & Payments)
+    var showAddBillDialog by remember { mutableStateOf(false) }
+    var showAddPaymentDialog by remember { mutableStateOf(false) }
+    var preselectedCustomerForTx by remember { mutableStateOf<Customer?>(null) }
+    var transactionForDetail by remember { mutableStateOf<TransactionRecord?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -228,6 +237,56 @@ fun AdminHomeScreen(
         )
     }
 
+    // Add Bill Dialog (Purchasing goods from customer)
+    if (showAddBillDialog) {
+        AddBillDialog(
+            customers = customers,
+            marketItems = marketItems,
+            preSelectedCustomer = preselectedCustomerForTx,
+            onDismiss = {
+                showAddBillDialog = false
+                preselectedCustomerForTx = null
+            },
+            onAddBill = { customerId, itemId, itemName, qty, unit, rate, total, billNo, notes, date ->
+                adminViewModel.addBill(customerId, itemId, itemName, qty, unit, rate, total, billNo, notes, date) {
+                    showAddBillDialog = false
+                    preselectedCustomerForTx = null
+                }
+            }
+        )
+    }
+
+    // Add Payment Dialog (Paying cash/bank to customer)
+    if (showAddPaymentDialog) {
+        AddPaymentDialog(
+            customers = customers,
+            preSelectedCustomer = preselectedCustomerForTx,
+            onDismiss = {
+                showAddPaymentDialog = false
+                preselectedCustomerForTx = null
+            },
+            onAddPayment = { customerId, amount, method, ref, notes, date ->
+                adminViewModel.addPayment(customerId, amount, method, ref, notes, date) {
+                    showAddPaymentDialog = false
+                    preselectedCustomerForTx = null
+                }
+            }
+        )
+    }
+
+    // Transaction Detail & Delete Dialog
+    transactionForDetail?.let { tx ->
+        TransactionDetailDialog(
+            transaction = tx,
+            onDismiss = { transactionForDetail = null },
+            onDelete = {
+                adminViewModel.deleteTransaction(tx.id) {
+                    transactionForDetail = null
+                }
+            }
+        )
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
@@ -315,7 +374,7 @@ fun AdminHomeScreen(
                     selected = currentTab == AdminNavTab.DASHBOARD,
                     onClick = { currentTab = AdminNavTab.DASHBOARD },
                     icon = { Icon(Icons.Default.Dashboard, contentDescription = "Dashboard") },
-                    label = { Text("Dashboard") },
+                    label = { Text("Overview") },
                     modifier = Modifier.testTag("nav_admin_dashboard")
                 )
                 NavigationBarItem(
@@ -326,18 +385,18 @@ fun AdminHomeScreen(
                     modifier = Modifier.testTag("nav_admin_customers")
                 )
                 NavigationBarItem(
+                    selected = currentTab == AdminNavTab.TRANSACTIONS,
+                    onClick = { currentTab = AdminNavTab.TRANSACTIONS },
+                    icon = { Icon(Icons.Default.ReceiptLong, contentDescription = "Bills & Payments") },
+                    label = { Text("Bills/Ledger") },
+                    modifier = Modifier.testTag("nav_admin_transactions")
+                )
+                NavigationBarItem(
                     selected = currentTab == AdminNavTab.DAILY_RATES,
                     onClick = { currentTab = AdminNavTab.DAILY_RATES },
                     icon = { Icon(Icons.Default.TrendingUp, contentDescription = "Rates") },
                     label = { Text("Daily Rates") },
                     modifier = Modifier.testTag("nav_admin_rates")
-                )
-                NavigationBarItem(
-                    selected = currentTab == AdminNavTab.HISTORY,
-                    onClick = { currentTab = AdminNavTab.HISTORY },
-                    icon = { Icon(Icons.Default.History, contentDescription = "History") },
-                    label = { Text("History") },
-                    modifier = Modifier.testTag("nav_admin_history")
                 )
                 NavigationBarItem(
                     selected = currentTab == AdminNavTab.NOTIFICATIONS,
@@ -349,15 +408,28 @@ fun AdminHomeScreen(
             }
         },
         floatingActionButton = {
-            if (currentTab == AdminNavTab.CUSTOMERS || currentTab == AdminNavTab.DASHBOARD) {
-                FloatingActionButton(
-                    onClick = { showAddCustomerDialog = true },
-                    containerColor = NavyDark,
-                    contentColor = Color.White,
-                    modifier = Modifier.testTag("fab_add_customer")
-                ) {
-                    Icon(Icons.Default.PersonAdd, contentDescription = "Add Customer")
+            when (currentTab) {
+                AdminNavTab.DASHBOARD, AdminNavTab.CUSTOMERS -> {
+                    FloatingActionButton(
+                        onClick = { showAddCustomerDialog = true },
+                        containerColor = NavyDark,
+                        contentColor = Color.White,
+                        modifier = Modifier.testTag("fab_add_customer")
+                    ) {
+                        Icon(Icons.Default.PersonAdd, contentDescription = "Add Customer")
+                    }
                 }
+                AdminNavTab.TRANSACTIONS -> {
+                    ExtendedFloatingActionButton(
+                        onClick = { showAddBillDialog = true },
+                        containerColor = NavyDark,
+                        contentColor = Color.White,
+                        icon = { Icon(Icons.Default.AddShoppingCart, contentDescription = null) },
+                        text = { Text("+ New Bill") },
+                        modifier = Modifier.testTag("fab_add_bill")
+                    )
+                }
+                else -> {}
             }
         },
         containerColor = LightSurface,
@@ -374,11 +446,22 @@ fun AdminHomeScreen(
                     marketRates = marketRates,
                     marketItems = marketItems,
                     customers = customers,
+                    transactions = transactions,
                     onToggleMarket = { adminViewModel.toggleMarketStatus(it) },
                     onNavigateToRates = { currentTab = AdminNavTab.DAILY_RATES },
                     onNavigateToCustomers = { currentTab = AdminNavTab.CUSTOMERS },
+                    onNavigateToTransactions = { currentTab = AdminNavTab.TRANSACTIONS },
                     onAddCustomerClick = { showAddCustomerDialog = true },
-                    onUpdateBalanceClick = { customerForBalanceUpdate = it }
+                    onAddBillClick = {
+                        preselectedCustomerForTx = null
+                        showAddBillDialog = true
+                    },
+                    onAddPaymentClick = {
+                        preselectedCustomerForTx = null
+                        showAddPaymentDialog = true
+                    },
+                    onUpdateBalanceClick = { customerForBalanceUpdate = it },
+                    onTransactionClick = { transactionForDetail = it }
                 )
                 AdminNavTab.CUSTOMERS -> AdminCustomersView(
                     customers = customers,
@@ -386,9 +469,30 @@ fun AdminHomeScreen(
                     onSearchQueryChange = { adminViewModel.setSearchQuery(it) },
                     onEditCustomer = { customerToEdit = it },
                     onUpdateBalance = { customerForBalanceUpdate = it },
+                    onAddBillForCustomer = { cust ->
+                        preselectedCustomerForTx = cust
+                        showAddBillDialog = true
+                    },
+                    onAddPaymentForCustomer = { cust ->
+                        preselectedCustomerForTx = cust
+                        showAddPaymentDialog = true
+                    },
                     onToggleActive = { adminViewModel.toggleCustomerActive(it.id) },
                     onDeleteCustomer = { customerToDelete = it },
                     onAddCustomerClick = { showAddCustomerDialog = true }
+                )
+                AdminNavTab.TRANSACTIONS -> AdminTransactionsView(
+                    transactions = transactions,
+                    customers = customers,
+                    onAddBillClick = {
+                        preselectedCustomerForTx = null
+                        showAddBillDialog = true
+                    },
+                    onAddPaymentClick = {
+                        preselectedCustomerForTx = null
+                        showAddPaymentDialog = true
+                    },
+                    onTransactionClick = { transactionForDetail = it }
                 )
                 AdminNavTab.DAILY_RATES -> AdminDailyRatesView(
                     marketRates = marketRates,
@@ -399,9 +503,6 @@ fun AdminHomeScreen(
                     onRenameItemClick = { itemToRename = it },
                     onRemoveItemClick = { itemToRemove = it },
                     onToggleMarket = { adminViewModel.toggleMarketStatus(it) }
-                )
-                AdminNavTab.HISTORY -> AdminRateHistoryView(
-                    rateHistory = rateHistory
                 )
                 AdminNavTab.NOTIFICATIONS -> AdminNotificationsView(
                     notifications = notifications,
@@ -418,11 +519,16 @@ fun AdminDashboardView(
     marketRates: MarketRates?,
     marketItems: List<MarketItem> = emptyList(),
     customers: List<Customer>,
+    transactions: List<TransactionRecord> = emptyList(),
     onToggleMarket: (Boolean) -> Unit,
     onNavigateToRates: () -> Unit,
     onNavigateToCustomers: () -> Unit,
+    onNavigateToTransactions: () -> Unit = {},
     onAddCustomerClick: () -> Unit,
+    onAddBillClick: () -> Unit = {},
+    onAddPaymentClick: () -> Unit = {},
     onUpdateBalanceClick: (Customer) -> Unit,
+    onTransactionClick: (TransactionRecord) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
@@ -442,6 +548,70 @@ fun AdminDashboardView(
             fontWeight = FontWeight.Bold,
             color = NavyDark
         )
+
+        // ==================== QUICK ACTION BUTTONS (BILL / PAYMENT / CUSTOMER) ====================
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(CardBorder))
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Quick Actions (فوری اندراج)",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SlateMuted
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // New Bill Button (Mall Purchase)
+                    Button(
+                        onClick = onAddBillClick,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("button_quick_add_bill"),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp)
+                    ) {
+                        Icon(Icons.Default.AddShoppingCart, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color(0xFFFCA5A5))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "+ Bill (مال خریداری)",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+
+                    // New Payment Button (Adaigi)
+                    Button(
+                        onClick = onAddPaymentClick,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("button_quick_add_payment"),
+                        colors = ButtonDefaults.buttonColors(containerColor = PayableGreen),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp)
+                    ) {
+                        Icon(Icons.Default.Payment, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.White)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "+ Payment (ادائیگی)",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+        }
 
         // Metrics Grid (2x2)
         Row(
@@ -576,6 +746,74 @@ fun AdminDashboardView(
             }
         }
 
+        // ==================== TRANSACTION TOTALS ROW ====================
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Total Mall Purchased (Bills)
+            Card(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onNavigateToTransactions() },
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(CardBorder))
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Total Bills (مال)", fontSize = 11.sp, color = SlateMuted)
+                        Icon(Icons.Default.ShoppingCart, contentDescription = null, tint = NavyDark, modifier = Modifier.size(15.dp))
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = FormatUtils.formatPkr(stats.totalBillsAmount),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = NavyDark,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text("Purchased goods", fontSize = 10.sp, color = SlateMuted)
+                }
+            }
+
+            // Total Payments Given
+            Card(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onNavigateToTransactions() },
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(CardBorder))
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Total Paid (ادائیگی)", fontSize = 11.sp, color = SlateMuted)
+                        Icon(Icons.Default.Payment, contentDescription = null, tint = PayableGreen, modifier = Modifier.size(15.dp))
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = FormatUtils.formatPkr(stats.totalPaymentsAmount),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = PayableGreen,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text("Cash & Bank transfers", fontSize = 10.sp, color = SlateMuted)
+                }
+            }
+        }
+
         // ==================== MARKET STATUS CONTROL CARD ====================
         MarketStatusBanner(
             isOpen = isMarketOpen,
@@ -668,6 +906,55 @@ fun AdminDashboardView(
                         }
                     }
                 }
+            }
+        }
+
+        // ==================== RECENT TRANSACTIONS (BILLS & PAYMENTS) ====================
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text("Recent Activity (تازہ ترین کھاتہ)", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = NavyDark)
+                Text("Latest bills & payments", fontSize = 11.sp, color = SlateMuted)
+            }
+            TextButton(onClick = onNavigateToTransactions) {
+                Text("View All (${transactions.size}) →", fontWeight = FontWeight.Bold)
+            }
+        }
+
+        if (transactions.isEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(CardBorder))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text("No bills or payments recorded yet", fontSize = 13.sp, color = SlateMuted)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = onAddBillClick) {
+                            Text("+ Add Bill")
+                        }
+                        OutlinedButton(onClick = onAddPaymentClick) {
+                            Text("+ Add Payment")
+                        }
+                    }
+                }
+            }
+        } else {
+            transactions.take(4).forEach { tx ->
+                TransactionCard(
+                    transaction = tx,
+                    onClick = { onTransactionClick(tx) }
+                )
             }
         }
 
@@ -1027,6 +1314,8 @@ fun AdminCustomersView(
     onSearchQueryChange: (String) -> Unit,
     onEditCustomer: (Customer) -> Unit,
     onUpdateBalance: (Customer) -> Unit,
+    onAddBillForCustomer: (Customer) -> Unit = {},
+    onAddPaymentForCustomer: (Customer) -> Unit = {},
     onToggleActive: (Customer) -> Unit,
     onDeleteCustomer: (Customer) -> Unit,
     onAddCustomerClick: () -> Unit,
@@ -1121,6 +1410,8 @@ fun AdminCustomersView(
                         customer = cust,
                         onEdit = { onEditCustomer(cust) },
                         onUpdateBalance = { onUpdateBalance(cust) },
+                        onAddBill = { onAddBillForCustomer(cust) },
+                        onAddPayment = { onAddPaymentForCustomer(cust) },
                         onToggleActive = { onToggleActive(cust) },
                         onDelete = { onDeleteCustomer(cust) }
                     )
@@ -1135,6 +1426,8 @@ fun CustomerAdminCard(
     customer: Customer,
     onEdit: () -> Unit,
     onUpdateBalance: () -> Unit,
+    onAddBill: () -> Unit = {},
+    onAddPayment: () -> Unit = {},
     onToggleActive: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -1227,31 +1520,64 @@ fun CustomerAdminCard(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Action Buttons Row
+            // Quick Transaction Shortcuts (Bill / Payment)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                Button(
+                    onClick = onAddBill,
+                    modifier = Modifier.weight(1f).height(38.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
+                    contentPadding = PaddingValues(horizontal = 6.dp)
+                ) {
+                    Icon(Icons.Default.AddShoppingCart, contentDescription = null, modifier = Modifier.size(13.dp), tint = Color(0xFFFCA5A5))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("+ Bill (مال)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+
+                Button(
+                    onClick = onAddPayment,
+                    modifier = Modifier.weight(1f).height(38.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = PayableGreen),
+                    contentPadding = PaddingValues(horizontal = 6.dp)
+                ) {
+                    Icon(Icons.Default.Payment, contentDescription = null, modifier = Modifier.size(13.dp), tint = Color.White)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("+ Payment (ادائیگی)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Action Buttons Row (Balance / Edit / Delete)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 OutlinedButton(
                     onClick = onUpdateBalance,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).height(36.dp),
                     shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
+                    contentPadding = PaddingValues(horizontal = 6.dp)
                 ) {
-                    Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, modifier = Modifier.size(13.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Balance", fontSize = 12.sp)
+                    Text("Adjust Bal", fontSize = 11.sp)
                 }
 
                 OutlinedButton(
                     onClick = onEdit,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).height(36.dp),
                     shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
+                    contentPadding = PaddingValues(horizontal = 6.dp)
                 ) {
-                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(13.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Edit", fontSize = 12.sp)
+                    Text("Edit Rates", fontSize = 11.sp)
                 }
 
                 IconButton(
@@ -1260,6 +1586,324 @@ fun CustomerAdminCard(
                 ) {
                     Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = ReceivableRed)
                 }
+            }
+        }
+    }
+}
+
+// ==================== ADMIN TRANSACTIONS VIEW (BILLS & PAYMENTS LEDGER) ====================
+@Composable
+fun AdminTransactionsView(
+    transactions: List<TransactionRecord>,
+    customers: List<Customer>,
+    onAddBillClick: () -> Unit,
+    onAddPaymentClick: () -> Unit,
+    onTransactionClick: (TransactionRecord) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedTypeFilter by remember { mutableStateOf("ALL") } // ALL, BILL, PAYMENT
+
+    val filteredTransactions = transactions.filter { tx ->
+        val matchesSearch = tx.customerName.contains(searchQuery, ignoreCase = true) ||
+                tx.itemName.contains(searchQuery, ignoreCase = true) ||
+                tx.billNumber.contains(searchQuery, ignoreCase = true) ||
+                tx.notes.contains(searchQuery, ignoreCase = true) ||
+                tx.paymentMethod.contains(searchQuery, ignoreCase = true)
+
+        val matchesType = when (selectedTypeFilter) {
+            "BILL" -> tx.type == TransactionType.BILL
+            "PAYMENT" -> tx.type == TransactionType.PAYMENT
+            else -> true
+        }
+
+        matchesSearch && matchesType
+    }
+
+    val totalBills = transactions.filter { it.type == TransactionType.BILL }.sumOf { it.amount }
+    val totalPayments = transactions.filter { it.type == TransactionType.PAYMENT }.sumOf { it.amount }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Header with Action Buttons
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text("Bills & Ledger (کھاتہ و بل)", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = NavyDark)
+                Text("Customer purchases & payment ledger", fontSize = 11.sp, color = SlateMuted)
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Button(
+                    onClick = onAddBillClick,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = NavyDark),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                ) {
+                    Icon(Icons.Default.AddShoppingCart, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Bill (مال)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Button(
+                    onClick = onAddPaymentClick,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = PayableGreen),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                ) {
+                    Icon(Icons.Default.Payment, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Payment (ادائیگی)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        // Summary Bar (Total Bills vs Total Payments)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Card(
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(CardBorder))
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("Total Bills (مال خریداری)", fontSize = 11.sp, color = SlateMuted)
+                    Text(
+                        text = FormatUtils.formatPkr(totalBills),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = NavyDark
+                    )
+                }
+            }
+
+            Card(
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(CardBorder))
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("Total Payments (ادائیگی)", fontSize = 11.sp, color = SlateMuted)
+                    Text(
+                        text = FormatUtils.formatPkr(totalPayments),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = PayableGreen
+                    )
+                }
+            }
+        }
+
+        // Search Bar
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            placeholder = { Text("Search customer, item, bill #...") },
+            colors = appTextFieldColors(),
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = SlateMuted) },
+            trailingIcon = {
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(onClick = { searchQuery = "" }) {
+                        Icon(Icons.Default.Clear, contentDescription = "Clear")
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth().testTag("search_transactions_input"),
+            shape = RoundedCornerShape(12.dp),
+            singleLine = true
+        )
+
+        // Type Filter Chips
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            listOf(
+                "ALL" to "All (${transactions.size})",
+                "BILL" to "Bills / خریداری (${transactions.count { it.type == TransactionType.BILL }})",
+                "PAYMENT" to "Payments / ادائیگی (${transactions.count { it.type == TransactionType.PAYMENT }})"
+            ).forEach { (key, label) ->
+                FilterChip(
+                    selected = selectedTypeFilter == key,
+                    onClick = { selectedTypeFilter = key },
+                    label = { Text(label, fontSize = 11.sp, fontWeight = if (selectedTypeFilter == key) FontWeight.Bold else FontWeight.Normal) }
+                )
+            }
+        }
+
+        // Transactions List
+        if (filteredTransactions.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Default.ReceiptLong, contentDescription = null, tint = SlateMuted, modifier = Modifier.size(48.dp))
+                    Text("No transactions found", fontSize = 15.sp, color = SlateMuted)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = onAddBillClick,
+                            colors = ButtonDefaults.buttonColors(containerColor = NavyDark)
+                        ) {
+                            Text("+ Add Bill")
+                        }
+                        Button(
+                            onClick = onAddPaymentClick,
+                            colors = ButtonDefaults.buttonColors(containerColor = PayableGreen)
+                        ) {
+                            Text("+ Add Payment")
+                        }
+                    }
+                }
+            }
+        } else {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                items(filteredTransactions, key = { it.id }) { tx ->
+                    TransactionCard(
+                        transaction = tx,
+                        onClick = { onTransactionClick(tx) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun TransactionCard(
+    transaction: TransactionRecord,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isBill = transaction.type == TransactionType.BILL
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .testTag("tx_card_${transaction.id}"),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(CardBorder))
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Type Badge Icon
+                    Surface(
+                        shape = CircleShape,
+                        color = if (isBill) Color(0xFFFEF2F2) else PayableGreenBg,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = if (isBill) Icons.Default.ShoppingCart else Icons.Default.Payment,
+                                contentDescription = null,
+                                tint = if (isBill) ReceivableRed else PayableGreen,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    Column {
+                        Text(
+                            text = transaction.customerName,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = NavyDark
+                        )
+                        Text(
+                            text = "${transaction.date} • ${if (isBill) "Bill (مال خریداری)" else "Payment (${transaction.paymentMethod})"}",
+                            fontSize = 11.sp,
+                            color = SlateMuted
+                        )
+                    }
+                }
+
+                // Amount
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = FormatUtils.formatPkr(transaction.amount),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Black,
+                        color = if (isBill) ReceivableRed else PayableGreen
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = if (isBill) ReceivableRedBg else PayableGreenBg
+                    ) {
+                        Text(
+                            text = if (isBill) "+ BILL" else "- PAYMENT",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (isBill) ReceivableRed else PayableGreen,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+
+            // If Bill, show quantity x rate details
+            if (isBill && transaction.quantity > 0) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Surface(
+                    color = Color(0xFFF8FAFC),
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "${transaction.itemName}: ${transaction.quantity} ${transaction.unit} @ Rs. ${transaction.rate}/${transaction.unit}",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = NavyDark
+                        )
+                        if (transaction.billNumber.isNotBlank()) {
+                            Text(
+                                text = "Bill #${transaction.billNumber}",
+                                fontSize = 11.sp,
+                                color = SlateMuted
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (transaction.notes.isNotBlank()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Note: ${transaction.notes}",
+                    fontSize = 11.sp,
+                    color = SlateMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }
